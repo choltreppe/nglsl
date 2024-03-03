@@ -97,6 +97,7 @@ type
     of exprPar: expr: Expr
 
     typ: Typ
+    nimNode: NimNode
 
   StmtKind = enum stmtExpr, stmtVarDef, stmtAsgn, stmtReturn, stmtIf
   Stmt = ref object
@@ -106,7 +107,7 @@ type
     of stmtVarDef:
       defVar: Var
       varTyp: Typ
-      initVal: Option[Expr]
+      initVal: Expr  # nil if none
 
     of stmtAsgn:
       lval, rval: Expr
@@ -122,7 +123,9 @@ type
         cond: Expr,
         body: StmtList
       ]]
-      elseBranch: StmtList
+      elseBranch: StmtList  # empty if none
+    
+    nimNode: NimNode
 
   StmtList = seq[Stmt]
 
@@ -130,9 +133,6 @@ type
     toplevelDefs: seq[QualifiedVarDef]
     funcs: FuncTable
     stmts: StmtList
-
-
-converter asTyp(typ: BasicTyp): Typ = Typ(kind: typBasic, typ: typ)
 
 
 func `$`(typ: Typ): string =
@@ -146,7 +146,9 @@ func `$`(typ: Typ): string =
   of typArray: assert false; ""
   else: $typ.kind
 
-func `$`(v: Var): string {.inline.} = v.name
+func `$`(v: Var): string {.inline.} =
+  #v.name
+  &"{v.name}<{v.id}>"
 
 proc `$`(expr: Expr): string =
   case expr.kind
@@ -169,61 +171,60 @@ proc genCode(prog: Prog): string =
   var code: string
 
   proc genVarDef(v: Var, typ: Typ): string =
-    var name = v.name
+    var arrDims: string
     var typ = typ
     while typ.kind == typArray:
-      name &= &"[{typ.len}]"
+      arrDims &= &"[{typ.len}]"
       typ = typ.arrayTyp
-    &"{typ} {name}"
+    &"{typ} {v}{arrDims}"
 
   proc gen(def: QualifiedVarDef): string =
     $def.quali & " " & genVarDef(def.v, def.typ)
 
   proc gen(stmts: StmtList, indent: int) =
     let indentSpaces = "  ".repeat(indent)
+    proc addLine(s: string) =
+      code &= "\n"&indentSpaces&s
+
     for stmt in stmts:
-      code &= indentSpaces
       case stmt.kind
       of stmtExpr:
-        code &= $stmt.expr & ";"
+        addLine $stmt.expr & ";"
 
       of stmtVarDef:
-        code &= genVarDef(stmt.defVar, stmt.varTyp)
-        if Some(@v) ?= stmt.initVal:
-          code &= &" = {v}"
+        addLine genVarDef(stmt.defVar, stmt.varTyp)
+        if stmt.initVal != nil:
+          code &= &" = {stmt.initVal}"
         code &= ";"
 
       of stmtAsgn:
-        code &= &"{stmt.lval} = {stmt.rval};"
+        addLine &"{stmt.lval} = {stmt.rval};"
 
       of stmtReturn:
-        code &= &"return {stmt.ret};"
+        addLine &"return {stmt.ret};"
 
       of stmtIf:
         for i, (cond, body) in stmt.elifBranches:
-          if i > 0: code &= indentSpaces&"else "
-          code &= &"if({cond}) {{\n"
+          addLine if i == 0: "" else: "else "
+          code &= &"if({cond}) {{"
           gen(body, indent+1)
-          code &= "} "
+          addLine "}"
         if len(stmt.elseBranch) > 0:
-          code &= "else {\n"
+          addLine "else {"
           gen(stmt.elseBranch, indent+1)
-          code &= "}"
-        
-      code &= "\n"
+          addLine "}"
 
-  code &= "#version 410\n\n"
+  code &= "#version 410\n"
 
   for def in prog.toplevelDefs:
-    code &= gen(def)&";\n"
-  code &= "\n"
+    code &= "\n"&gen(def)&";"
 
   for name, defs in prog.funcs:
     for def in defs:
       let params = def.params.mapIt(gen(it)).join(", ")
-      code &= &"{def.retTyp} {name}({params}) {{\n"
+      code &= &"\n\n{def.retTyp} {name}({params}) {{"
       gen(def.body, 1)
-      code &= "}\n\n"
+      code &= "\n}"
 
   gen(prog.stmts, 0)
   code
@@ -233,6 +234,8 @@ proc genCode(prog: Prog): string =
 func identStr(n: NimNode): string {.inline.} =
   assert n.kind == nnkIdent
   n.strVal.nimIdentNormalize
+
+converter asTyp(typ: BasicTyp): Typ = Typ(kind: typBasic, typ: typ)
 
 let genericTyps {.compiletime.} = block:
   var typs: seq[(string, Typ)]
@@ -286,102 +289,106 @@ proc parseTyp(node: NimNode): Typ =
 func newVar(name: string): Var {.inline.} = Var(name: name)
 
 proc parseExpr(node: NimNode): Expr =
-  case node.kind
-  of nnkIntLit: Expr(kind: exprLit, typ: typInt, val: node.repr)
-  of nnkFloatLit: Expr(kind: exprLit, typ: typFloat, val: node.repr)
-  of nnkIdent:
-    let name = node.identStr
-    if name in ["true", "false"]:  Expr(kind: exprLit, typ: typBool, val: name)
+  result =
+    case node.kind
+    of nnkIntLit: Expr(kind: exprLit, typ: typInt, val: node.repr)
+    of nnkFloatLit: Expr(kind: exprLit, typ: typFloat, val: node.repr)
+    of nnkIdent:
+      let name = node.identStr
+      if name in ["true", "false"]:  Expr(kind: exprLit, typ: typBool, val: name)
+      
+      else: Expr(kind: exprVar, v: newVar(name))
     
-    else: Expr(kind: exprVar, v: newVar(name))
-  
-  of nnkCall, nnkCommand:
-    let (nameNode, args) =
-      if node[0].kind == nnkDotExpr:
-        (node[0][1], node[0][0] & node[1..^1])
-      else:
-        (node[0], node[1..^1])
-    nameNode.expectKind {nnkIdent, nnkSym}
-    let name = nameNode.identStr
-    Expr(
-      kind: exprCall,
-      funcName: name,
-      args: args.map(parseExpr)
-    )
-
-  of nnkDotExpr:
-    Expr(
-      kind: exprSwizzel,
-      vec: parseExpr(node[0]),
-      fields: node[1].strVal
-    )
-
-  of nnkPrefix:
-    let opStr = node[0].strVal
-    let op = 
-      try: parseEnum[UnaryOp](opStr)
-      except: glslErr &"unknown operator `{opStr}`", node
-    Expr(
-      kind: exprUnOp,
-      unop: op,
-      operand: parseExpr(node[1])
-    )
-
-  of nnkInfix:
-    template buildExpr(o, a): Expr =
-      var e = Expr(
-        kind: exprBinOp,
-        binop: o,
-        lop: parseExpr(node[1]),
-        rop: parseExpr(node[2])
+    of nnkCall, nnkCommand:
+      let (nameNode, args) =
+        if node[0].kind == nnkDotExpr:
+          (node[0][1], node[0][0] & node[1..^1])
+        else:
+          (node[0], node[1..^1])
+      nameNode.expectKind {nnkIdent, nnkSym}
+      let name = nameNode.identStr
+      Expr(
+        kind: exprCall,
+        funcName: name,
+        args: args.map(parseExpr)
       )
-      e.withAsgn = a
-      e
-    let opStr = node[0].strVal
-    let op =
-      case opStr
-      of "and": opAnd
-      of "or": opOr
-      of "xor": opXor
-      else:
-        try: parseEnum[BinaryOp](opStr)
-        except:
-          if len(opStr) > 1 and opStr[^1] == '=':
-            try:
-              let op = parseEnum[BinaryOp](opStr[0 ..< ^1])
-              if op in opAdd..opDiv:
-                return buildExpr(op, true)
-            except: discard
-          glslErr &"unknown operator `{opStr}`", node
-    buildExpr(op, false)
 
-  of nnkIfExpr, nnkIfStmt:
-    if len(node) != 2 or node[1].kind notin {nnkElse, nnkElseExpr}:
-      glslErr "if expressions only support a single if/else pair", node
-    Expr(
-      kind: exprTernaryOp,
-      tcond: parseExpr(node[0][0]),
-      tif: parseExpr(node[0][1]),
-      telse: parseExpr(node[1][0])
-    )
+    of nnkDotExpr:
+      Expr(
+        kind: exprSwizzel,
+        vec: parseExpr(node[0]),
+        fields: node[1].strVal
+      )
 
-  of nnkPar:
-    Expr(kind: exprPar, expr: parseExpr(node[0]))
+    of nnkPrefix:
+      let opStr = node[0].strVal
+      let op = 
+        try: parseEnum[UnaryOp](opStr)
+        except: glslErr &"unknown operator `{opStr}`", node
+      Expr(
+        kind: exprUnOp,
+        unop: op,
+        operand: parseExpr(node[1])
+      )
 
-  of nnkStmtList, nnkStmtListExpr:
-    if len(node) == 1:
+    of nnkInfix:
+      proc buildExpr(op: BinaryOp): Expr =
+        Expr(
+          kind: exprBinOp,
+          binop: op,
+          lop: parseExpr(node[1]),
+          rop: parseExpr(node[2]),
+          nimNode: node
+        )
+      let opStr = node[0].strVal
+      let op =
+        case opStr
+        of "and": opAnd
+        of "or": opOr
+        of "xor": opXor
+        else:
+          try: parseEnum[BinaryOp](opStr)
+          except:
+            if len(opStr) > 1 and opStr[^1] == '=':
+              try:
+                let op = parseEnum[BinaryOp](opStr[0 ..< ^1])
+                if op in opAdd..opDiv:
+                  var expr = buildExpr(op)
+                  expr.withAsgn = true
+                  return expr
+              except: discard
+            glslErr &"unknown operator `{opStr}`", node
+      buildExpr(op)
+
+    of nnkIfExpr, nnkIfStmt:
+      if len(node) != 2 or node[1].kind notin {nnkElse, nnkElseExpr}:
+        glslErr "if expressions only support a single if/else pair", node
+      Expr(
+        kind: exprTernaryOp,
+        tcond: parseExpr(node[0][0]),
+        tif: parseExpr(node[0][1]),
+        telse: parseExpr(node[1][0])
+      )
+
+    of nnkPar:
       Expr(kind: exprPar, expr: parseExpr(node[0]))
+
+    of nnkStmtList, nnkStmtListExpr:
+      if len(node) == 1:
+        Expr(kind: exprPar, expr: parseExpr(node[0]))
+      else:
+        glslErr "statement-list expressions are not supported", node
+    
     else:
-      glslErr "statement-list expressions are not supported", node
-  
-  else:
-    glslErr "TODO: " & $node.kind, node
+      glslErr "TODO: " & $node.kind, node
+
+  result.nimNode = node
 
 proc parseStmts(
   stmts: var StmtList,
   node: NimNode
 ) =
-  stmts.add:
+  var newStmt =
     case node.kind
     of nnkStmtList:
       for node in node: parseStmts(stmts, node)
@@ -400,9 +407,9 @@ proc parseStmts(
         if node.kind == nnkVarTuple:
           glslErr "no tuple unpacking supported", node
         node.expectKind nnkIdentDefs
-        let val =
-          if node.kind == nnkEmpty: none(Expr)
-          else: some(parseExpr(node[^1]))
+        var val: Expr
+        if node.kind != nnkEmpty:
+          val = parseExpr(node[^1])
         var typ: Typ
         if node[^2].kind != nnkEmpty:
           typ = parseTyp(node[^2])
@@ -411,7 +418,8 @@ proc parseStmts(
             kind: stmtVarDef,
             defVar: newVar(v.identStr),
             varTyp: typ,
-            initVal: val
+            initVal: val,
+            nimNode: node
           )
       return
 
@@ -434,6 +442,9 @@ proc parseStmts(
       stmt
 
     else: Stmt(kind: stmtExpr, expr: parseExpr(node))
+
+  newStmt.nimNode = node
+  stmts.add newStmt
 
 proc parse(node: NimNode): Prog =
   for i, node in node:
@@ -484,6 +495,88 @@ proc parse(node: NimNode): Prog =
 
 
 
+proc bindSyms(prog: var Prog) =
+  var nextSymId = 0
+  proc addVar(symIds: var Table[string, int], v: var Var) =
+    v.id = nextSymId
+    symIds[v.name] = nextSymId
+    inc nextSymId
+
+  proc bindSyms(expr: var Expr, symIds: Table[string, int]) =
+    case expr.kind
+    of exprLit: discard
+
+    of exprVar:
+      if expr.v.name in symIds:
+        expr.v.id = symIds[expr.v.name]
+      else:
+        glslErr &"`{expr.v.name}` not defined", expr.nimNode
+
+    of exprArrayAcc:
+      bindSyms(expr.arr, symIds)
+      bindSyms(expr.index, symIds)
+
+    of exprSwizzel:
+      bindSyms(expr.vec, symIds)
+
+    of exprCall:
+      for arg in expr.args.mitems:
+        bindSyms(arg, symIds)
+
+    of exprUnOp:
+      bindSyms(expr.operand, symIds)
+
+    of exprTernaryOp:
+      bindSyms(expr.tcond, symIds)
+      bindSyms(expr.tif, symIds)
+      bindSyms(expr.telse, symIds)
+
+    of exprBinOp:
+      bindSyms(expr.lop, symIds)
+      bindSyms(expr.rop, symIds)
+
+    of exprPar:
+      bindSyms(expr.expr, symIds)
+
+  proc bindSyms(stmts: var StmtList, symIds: Table[string, int]) =
+    var symIds = symIds
+    for stmt in stmts.mitems:
+      case stmt.kind
+      of stmtExpr:
+        bindSyms(stmt.expr, symIds)
+
+      of stmtVarDef:
+        symIds.addVar stmt.defVar
+        if stmt.initVal != nil:
+          bindSyms(stmt.initVal, symIds)
+
+      of stmtAsgn:
+        bindSyms(stmt.lval, symIds)
+        bindSyms(stmt.rval, symIds)
+
+      of stmtReturn:
+        bindSyms(stmt.ret, symIds)
+
+      of stmtIf:
+        for (cond, body) in stmt.elifBranches.mitems:
+          bindSyms(cond, symIds)
+          bindSyms(body, symIds)
+        bindSyms(stmt.elseBranch, symIds)
+
+  var symIds: Table[string, int]
+  for def in prog.toplevelDefs.mitems:
+    symIds.addVar def.v
+
+  for funcs in prog.funcs.mvalues:
+    for def in funcs.mitems:
+      var symIds = symIds
+      for param in def.params.mitems:
+        symIds.addVar param.v
+      bindSyms(def.body, symIds)
+
+
+
 macro shader*(body: untyped): string =
   var prog = parse(body)
+  bindSyms(prog)
   newLit(genCode(prog))
