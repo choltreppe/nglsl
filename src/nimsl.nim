@@ -25,9 +25,11 @@ type
       typ: BasicTyp
     of typSampler:
       samplerDim: range[1..3]
-    of typVec, typMat:
+    of typVec:
       dim: range[2..4]
-      ofTyp: BasicTyp
+      vecTyp: BasicTyp
+    of typMat:
+      cols, rows: range[2..4]
     of typArray:
       len: Natural
       arrayTyp: Typ
@@ -59,13 +61,15 @@ type
 
   ExprKind = enum
     exprLit, exprVar,
-    exprArrayAcc, exprSwizzel, exprCall,
+    exprArrayAcc, exprSwizzle, exprCall,
     exprUnOp, exprBinOp, exprTernaryOp
     exprPar
   
   Expr = ref object
     case kind: ExprKind
-    of exprLit: val: string
+    of exprLit:
+      val: string
+      typ: BasicTyp
 
     of exprVar: v: Var
 
@@ -73,7 +77,7 @@ type
       arr: Expr
       index: Expr
 
-    of exprSwizzel:
+    of exprSwizzle:
       vec: Expr
       fields: string
 
@@ -96,7 +100,6 @@ type
 
     of exprPar: expr: Expr
 
-    typ: Typ
     nimNode: NimNode
 
   StmtKind = enum stmtExpr, stmtVarDef, stmtAsgn, stmtReturn, stmtIf
@@ -111,9 +114,6 @@ type
 
     of stmtAsgn:
       lval, rval: Expr
-      case withOp: bool
-      of true: op: range[opAdd..opDiv]
-      of false: discard
 
     of stmtReturn:
       ret: Expr
@@ -135,6 +135,19 @@ type
     stmts: StmtList
 
 
+proc `==`(a, b: Typ): bool =
+  if system.`==`(a, b): return true
+  if system.`==`(a, nil) or system.`==`(b, nil): return false
+  if a.kind != b.kind: return false
+  case a.kind
+  of typVoid, typImage: true
+  of typBasic: a.typ == b.typ
+  of typSampler: a.samplerDim == b.samplerDim
+  of typVec: a.dim == b.dim and a.vecTyp == b.vecTyp
+  of typMat: a.rows == b.rows and a.cols == b.cols
+  of typArray: a.len == b.len and a.arrayTyp == b.arrayTyp
+
+
 func `$`(typ: Typ): string =
   func short(typ: BasicTyp): string {.inline.} =
     if typ == typFloat: ""
@@ -142,20 +155,23 @@ func `$`(typ: Typ): string =
   case typ.kind
   of typBasic: $typ.typ
   of typSampler: &"sampler{typ.samplerDim}d"
-  of typVec, typMat: &"{typ.ofTyp.short}{typ.kind}{typ.dim}"
+  of typVec: &"{typ.vecTyp.short}vec{typ.dim}"
+  of typMat:
+    if typ.cols == typ.rows: &"mat{typ.cols}"
+    else: &"mat{typ.cols}x{typ.rows}"
   of typArray: assert false; ""
   else: $typ.kind
 
 func `$`(v: Var): string {.inline.} =
-  #v.name
-  &"{v.name}<{v.id}>"
+  v.name
+  #&"{v.name}<{v.id}>"
 
 proc `$`(expr: Expr): string =
   case expr.kind
   of exprLit: expr.val
   of exprVar: $expr.v
   of exprArrayAcc: &"{expr.arr}[{expr.index}]"
-  of exprSwizzel: &"{expr.vec}.{expr.fields}"
+  of exprSwizzle: &"{expr.vec}.{expr.fields}"
   of exprUnOp: &"{expr.unop}{expr.operand}"
   of exprBinOp:
     if expr.binop in opAdd..opDiv and expr.withAsgn:
@@ -239,36 +255,41 @@ converter asTyp(typ: BasicTyp): Typ = Typ(kind: typBasic, typ: typ)
 
 let genericTyps {.compiletime.} = block:
   var typs: seq[(string, Typ)]
-  proc addTyp(typ: Typ) = typs.add (capitalizeAscii($typ), typ)
+  proc addTyp(typ: Typ) = typs.add ($typ, typ)
   for dim in 1..3:
     addTyp Typ(kind: typSampler, samplerDim: dim)
-  template typVecMat(k: TypKind) =
-    for ofTyp in BasicTyp:
-      for dim in 2..4:
-        addTyp Typ(kind: k, dim: dim, ofTyp: ofTyp)
-  typVecMat(typVec)
-  typVecMat(typMat)
+  for vecTyp in BasicTyp:
+    for dim in 2..4:
+      addTyp Typ(kind: typVec, dim: dim, vecTyp: vecTyp)
+  for vecTyp in BasicTyp:
+    for cols in 2..4:
+      for rows in 2..4:
+        addTyp Typ(kind: typMat, cols: cols, rows: rows)
   typs
+
+proc parseTyp(name: string): Option[Typ] =
+  let lowerName = name.toLower
+  for (n, typ) in genericTyps:
+    if lowerName == n: return some(typ)
+  try:
+    some(parseEnum[BasicTyp](
+      case name
+      of "float32": "float"
+      of "float64": "double"
+      of "int32": "int"
+      of "uint32": "uint"
+      else: name
+    ).asTyp)
+  except: none(Typ)
 
 proc parseTyp(node: NimNode): Typ =
   case node.kind
   of nnkEmpty: Typ(kind: typVoid)
 
   of nnkIdent:
-    let name = node.repr.nimIdentNormalize
-    for (n, typ) in genericTyps:
-      if name == n: return typ
-    try:
-      parseEnum[BasicTyp](
-        case name
-        of "float32": "float"
-        of "float64": "double"
-        of "int32": "int"
-        of "uint32": "uint"
-        else: name
-      )
-    except:
-      glslErr &"unknown type `{name}`", node
+    let name = node.repr
+    if Some(@typ) ?= parseTyp(name.nimIdentNormalize): typ
+    else: glslErr &"unknown type `{name}`", node
   
   of nnkBracketExpr:
     let baseName = node[0].repr.nimIdentNormalize
@@ -315,7 +336,7 @@ proc parseExpr(node: NimNode): Expr =
 
     of nnkDotExpr:
       Expr(
-        kind: exprSwizzel,
+        kind: exprSwizzle,
         vec: parseExpr(node[0]),
         fields: node[1].strVal
       )
@@ -397,7 +418,6 @@ proc parseStmts(
     of nnkAsgn:
       Stmt(
         kind: stmtAsgn,
-        withOp: false,
         lval: parseExpr(node[0]),
         rval: parseExpr(node[1])
       )
@@ -495,7 +515,7 @@ proc parse(node: NimNode): Prog =
 
 
 
-proc bindSyms(prog: var Prog) =
+proc bindSyms(prog: var Prog): int =  # returns sym count
   var nextSymId = 0
   proc addVar(symIds: var Table[string, int], v: var Var) =
     v.id = nextSymId
@@ -516,7 +536,7 @@ proc bindSyms(prog: var Prog) =
       bindSyms(expr.arr, symIds)
       bindSyms(expr.index, symIds)
 
-    of exprSwizzel:
+    of exprSwizzle:
       bindSyms(expr.vec, symIds)
 
     of exprCall:
@@ -574,9 +594,207 @@ proc bindSyms(prog: var Prog) =
         symIds.addVar param.v
       bindSyms(def.body, symIds)
 
+  nextSymId
+
+
+
+proc assertLVal(expr: Expr) =
+  case expr.kind
+  of exprPar: assertLVal expr.expr
+  of exprArrayAcc: assertLVal expr.arr
+  of exprSwizzle: assertLVal expr.vec
+  of exprLit, exprCall, exprTernaryOp, exprUnOp, exprBinOp:
+    glslErr &"`{expr}` is not a l-value", expr.nimNode
+  else: discard
+
+template typError(a, b: Typ, node: NimNode) =
+  glslErr "types dont match: `" & $a & "` and `" & $b & "`", node
+
+template assertEq(a, b: Typ, node: NimNode) =
+  if a != b: typError a, b, node
+
+# is a number or some container of one ?
+proc assertNumberTyp(typs: varargs[Typ], node: NimNode) =
+  const msg = "expected a number type or a vec/mat/array of one"
+  for typ in typs:
+    case typ.kind
+    of typBasic:
+      if typ.typ == typBool:
+        glslErr msg, node
+    of typVec:
+      assertNumberTyp typ.vecTyp, node
+    of typMat: discard
+    of typArray:
+      assertNumberTyp typ.arrayTyp, node
+    else:
+      glslErr msg, node
+
+proc inferTyps(prog: var Prog, symCount: int) =
+  let funcs = prog.funcs
+  var varTyps = newSeq[Typ](symCount)
+
+  proc getTyp(expr: Expr): Typ =
+    case expr.kind
+    of exprVar: varTyps[expr.v.id]
+    of exprLit: expr.typ
+    of exprPar: getTyp(expr.expr)
+
+    of exprArrayAcc:
+      let indexTyp = getTyp(expr.index)
+      assertEq indexTyp, typInt, expr.nimNode  #TODO: check actual typing rules
+      let arrTyp = getTyp(expr.arr)
+      case arrTyp.kind
+      of typArray: arrTyp.arrayTyp
+      of typVec: arrTyp.vecTyp
+      of typMat: Typ(kind: typVec, vecTyp: typFloat, dim: arrTyp.cols)
+      else:
+        glslErr &"expected a vec, mat or array type but got `{arrTyp}`", expr.nimNode
+
+    of exprSwizzle:
+      const swizzelFields = ["xyzw", "stpq", "rgba"]
+      let vecTyp = getTyp(expr.vec)
+      if vecTyp.kind == typVec:
+        for fieldSet in swizzelFields:
+          if expr.fields[0] in fieldSet:
+            for field in expr.fields:
+              let i = fieldSet.find(field)
+              if i < 0:
+                glslErr &"unexpected `{field}` in swizzle", expr.nimNode
+              if i >= vecTyp.dim:
+                glslErr &"field `{field}` is out of range", expr.nimNode
+            return
+              if len(expr.fields) == 1: vecTyp.vecTyp.asTyp
+              else: Typ(
+                kind: typVec,
+                vecTyp: vecTyp.vecTyp,
+                dim: len(expr.fields)
+              )
+        glslErr &"unexpected `{expr.fields[0]}` in swizzle", expr.nimNode
+      glslErr &"expected a vec type but got `{vecTyp}`", expr.nimNode
+
+    of exprUnOp:
+      let typ = getTyp(expr.operand)
+      assertNumberTyp typ, expr.nimNode
+      typ
+
+    of exprBinOp:
+      let ltyp = getTyp(expr.lop)
+      let rtyp = getTyp(expr.rop)
+      case expr.binop
+      of opAdd..opDiv:
+        if expr.withAsgn: assertLVal expr.lop
+        assertNumberTyp ltyp, rtyp, expr.nimNode
+        if expr.binop == opMul:
+          template checkMatVecMul(m, v, vecAxis, otherAxis) =
+            if m.kind == typMat and v.kind == typVec and
+             v.vecTyp == typFloat and v.dim == m.otherAxis:
+                return Typ(kind: typVec, vecTyp: typFloat, dim: m.vecAxis)
+          checkMatVecMul(ltyp, rtyp, cols, rows)
+          checkMatVecMul(rtyp, ltyp, rows, cols)
+        assertEq ltyp, rtyp, expr.nimNode
+        ltyp
+      of opEq..opGe:
+        for typ in [ltyp, rtyp]:
+          if typ.kind != typBasic or typ.typ == typBool:
+            glslErr "expected a number type", expr.nimNode
+        assertEq ltyp, rtyp, expr.nimNode
+        typBool
+      of opAnd..opXor:
+        assertEq ltyp, typBool, expr.nimNode
+        assertEq rtyp, typBool, expr.nimNode
+        typBool
+
+    of exprTernaryOp:
+      let condTyp = getTyp(expr.tcond)
+      let ifTyp = getTyp(expr.tif)
+      let elseTyp = getTyp(expr.telse)
+      if condTyp != typBool:
+        typError expr.tcond.typ, typBool, expr.nimNode
+      if ifTyp != elseTyp:
+        glslErr &"types of ternary branches dont match `{ifTyp}` != `{elseTyp}`", expr.nimNode
+      ifTyp
+
+    of exprCall:
+      let argTyps = expr.args.map(getTyp)
+
+      # user defined
+      if expr.funcName in funcs:
+        for def in funcs[expr.funcName]:
+          if len(def.params) == len(expr.args) and
+             toSeq(0..<len(def.params)).allIt(def.params[it].typ == argTyps[it]):
+                return def.retTyp
+
+      # builtin
+
+      # constructors
+      let justOneBasicTyp = len(argTyps) == 1 and argTyps[0].kind == typBasic
+      var combVecDim = 0  # -1 if not just vecs and basics
+      for argTyp in argTyps:
+        combVecDim.inc:
+          case argTyp.kind
+          of typBasic: 1
+          of typVec: argTyp.dim
+          else: (combVecDim = -1; break)
+      if Some(@typ) ?= parseTyp(expr.funcName):
+        if (
+          case typ.kind
+          of typBasic: justOneBasicTyp
+          of typVec: justOneBasicTyp or combVecDim == typ.dim
+          of typMat: justOneBasicTyp or combVecDim == typ.cols * typ.rows  #TODO: support diagonal construction
+          else: false
+        ):
+          return typ
+
+      #case expr.funcName
+      #of "":
+
+      glslErr &"there is no `{expr.funcName}` with matching parameter types", expr.nimNode
+
+
+  proc inferTyps(stmts: var StmtList, retTyp: Typ) =
+    for stmt in stmts.mitems:
+      case stmt.kind
+      of stmtExpr:
+        discard getTyp(stmt.expr)
+
+      of stmtVarDef:
+        if stmt.initVal != nil:
+          let valTyp = getTyp(stmt.initVal)
+          if stmt.varTyp == nil:
+            stmt.varTyp = valTyp
+            varTyps[stmt.defVar.id] = valTyp
+          else:
+            assertEq valTyp, stmt.varTyp, stmt.nimNode
+            varTyps[stmt.defVar.id] = valTyp
+            #TODO: do rewrite of literals not matching
+
+      of stmtAsgn:
+        assertLVal stmt.lval
+        assertEq getTyp(stmt.rval), getTyp(stmt.lval), stmt.nimNode
+
+      of stmtReturn:
+        assertEq getTyp(stmt.ret), retTyp, stmt.nimNode
+
+      of stmtIf:
+        for branch in stmt.elifBranches.mitems:
+          let condTyp = getTyp(branch.cond)
+          if condTyp != typBool:
+            typError condTyp, typBool, stmt.nimNode
+          inferTyps branch.body, retTyp
+        inferTyps stmt.elseBranch, retTyp
+
+  for def in prog.toplevelDefs:
+    varTyps[def.v.id] = def.typ
+
+  for funcs in prog.funcs.mvalues:
+    for def in funcs.mitems:
+      for param in def.params:
+        varTyps[param.v.id] = param.typ
+      inferTyps def.body, def.retTyp
 
 
 macro shader*(body: untyped): string =
   var prog = parse(body)
-  bindSyms(prog)
+  let symCount = bindSyms(prog)
+  inferTyps(prog, symCount)
   newLit(genCode(prog))

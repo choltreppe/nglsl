@@ -8,17 +8,13 @@ let testShader = shader:
     finalColor: out Vec4
 
   proc test(a, b: Vec2): Vec4 =
-    let
-      x: Vec2 = vec2(1)
-      y, z: int = 1
-    if x == y:
-      let z: bool = true
-      if z: x += y
-    echo z
-    return if true: vec4((a + vec2(1, 2)) * 0.4, b.yx) else: vec4(1)
+    let v = a * b
+    if a.x > 0.8 and b.y < 1.0:
+      return vec4(0, a*b, 1)
+    else:
+      return if a.y == 0.0: vec4(1) else: vec4(0)
 
   proc main =
-    finalColor = vec4(a.cross b, 1)
-    finalColor += vec4(Vec3(0.1), 0)
+    finalColor += test(vec2(1, 0), vec2(0.8, 0.5))
 
 debugEcho "\n", testShader, "\n"
