@@ -1,5 +1,5 @@
 #
-#    nimsl - a glsl dsl for nim
+#    nglsl - a glsl dsl for nim
 #        (c) Copyright 2024 Joel Lienhard
 #
 #    See the file "LICENSE.txt", included in this
@@ -7,7 +7,7 @@
 #
 
 import std/macros
-import ./nimsl/private/[ast, parsing, semantics]
+import ./nglsl/private/[ast, parsing, semantics]
 
 
 macro shader*(body: untyped): string =

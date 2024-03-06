@@ -1,5 +1,5 @@
 #
-#    nimsl - a glsl dsl for nim
+#    nglsl - a glsl dsl for nim
 #        (c) Copyright 2024 Joel Lienhard
 #
 #    See the file "LICENSE.txt", included in this
@@ -28,7 +28,7 @@ type
 
   FuncTable* = OrderedTable[string, seq[FuncDef]]
 
-  UnaryOp* = enum opPos="+", opNeg="-", opInc="++", opDec="--"
+  UnaryOp* = enum opPos="+", opNeg="-", opInc="++", opDec="--", opNot="!"
 
   BinaryOp* = enum
     opAdd="+", opSub="-", opMul="*", opDiv="/",
@@ -37,7 +37,7 @@ type
 
   ExprKind* = enum
     exprLit, exprVar,
-    exprArrayAcc, exprSwizzle, exprCall,
+    exprArrayAcc, exprFieldAcc, exprCall,
     exprUnOp, exprBinOp, exprTernaryOp
     exprPar
   
@@ -53,7 +53,7 @@ type
       arr*: Expr
       index*: Expr
 
-    of exprSwizzle:
+    of exprFieldAcc:  # includes swizzle
       vec*: Expr
       fields*: string
 
@@ -120,7 +120,7 @@ proc `$`(expr: Expr): string =
   of exprLit: expr.val
   of exprVar: $expr.v
   of exprArrayAcc: &"{expr.arr}[{expr.index}]"
-  of exprSwizzle: &"{expr.vec}.{expr.fields}"
+  of exprFieldAcc: &"{expr.vec}.{expr.fields}"
   of exprUnOp: &"{expr.unop}{expr.operand}"
   of exprBinOp:
     if expr.binop in opAdd..opDiv and expr.withAsgn:

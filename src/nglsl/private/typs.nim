@@ -1,5 +1,5 @@
 #
-#    nimsl - a glsl dsl for nim
+#    nglsl - a glsl dsl for nim
 #        (c) Copyright 2024 Joel Lienhard
 #
 #    See the file "LICENSE.txt", included in this
@@ -60,6 +60,17 @@ func dim*(typ: Typ): int =
   else:
     assert false, &"typ of kind `{typ.kind}` has no dim"
     0
+
+func elemTyp*(typ: Typ): BasicTyp =
+  case typ.kind
+  of typBasic: typ.typ
+  of typVec: typ.vecTyp
+  else:
+    assert false, &"typ of kind `{typ.kind}` has no elem typ"
+    return
+
+func isFloatOrVecf*(typ: Typ): bool {.inline.} =
+  typ.kind in {typBasic, typVec} and typ.elemTyp == typFloat
 
 
 proc `==`*(a, b: Typ): bool =

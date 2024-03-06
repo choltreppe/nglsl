@@ -1,5 +1,5 @@
 #
-#    nimsl - a glsl dsl for nim
+#    nglsl - a glsl dsl for nim
 #        (c) Copyright 2024 Joel Lienhard
 #
 #    See the file "LICENSE.txt", included in this
@@ -43,16 +43,18 @@ proc parseExpr(node: NimNode): Expr =
 
     of nnkDotExpr:
       Expr(
-        kind: exprSwizzle,
+        kind: exprFieldAcc,
         vec: parseExpr(node[0]),
         fields: node[1].strVal
       )
 
     of nnkPrefix:
       let opStr = node[0].strVal
-      let op = 
-        try: parseEnum[UnaryOp](opStr)
-        except: glslErr &"unknown operator `{opStr}`", node
+      let op =
+        if opStr == "not": opNot
+        else:
+          try: parseEnum[UnaryOp](opStr)
+          except: glslErr &"unknown operator `{opStr}`", node
       Expr(
         kind: exprUnOp,
         unop: op,
