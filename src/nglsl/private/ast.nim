@@ -43,9 +43,7 @@ type
   
   Expr* = ref object
     case kind*: ExprKind
-    of exprLit:
-      val*: string
-      typ*: BasicTyp
+    of exprLit: val*: string
 
     of exprVar: v*: Var
 
@@ -76,6 +74,7 @@ type
 
     of exprPar: expr*: Expr
 
+    typ*: Typ
     nimNode*: NimNode
 
   ForRange* = object
@@ -147,6 +146,9 @@ proc assertNumberTyp*(typs: varargs[Typ], node: NimNode) =
     else:
       glslErr msg, node
 
+func isConvertableTo*(a, b: Typ): bool =
+  a.kind == b.kind and a.kind in {typBasic, typVec} and a.elemTyp != typBool
+
 proc convertTo*(expr: var Expr, typ: Typ) = 
   if typ.kind == typBasic and expr.kind == exprLit:
     macro genConversions: string =
@@ -167,15 +169,15 @@ proc convertTo*(expr: var Expr, typ: Typ) =
   else:
     expr = Expr(kind: exprCall, funcName: $typ, args: @[expr])
 
-proc tryUnify*(a: var Expr, atyp: Typ, b: var Expr, btyp: Typ): Typ =
-  if atyp == btyp: atyp
-  elif atyp.kind == btyp.kind and atyp.kind in {typBasic, typVec}:
-    if atyp.elemTyp > btyp.elemTyp:
-       b.convertTo(atyp); atyp
+proc tryUnify*(a: var Expr, b: var Expr): Typ =
+  if a.typ == b.typ: a.typ
+  elif a.typ.isConvertableTo(b.typ):
+    if a.typ.elemTyp > b.typ.elemTyp:
+       b.convertTo(a.typ); a.typ
     else:
-       a.convertTo(btyp); btyp
+       a.convertTo(b.typ); b.typ
   else:
-    typErr atyp, btyp, a.nimNode
+    typErr a.typ, b.typ, a.nimNode
 
 
 func `$`(v: Var): string {.inline.} =

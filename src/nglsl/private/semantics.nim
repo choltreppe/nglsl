@@ -117,97 +117,110 @@ proc inferTyps*(prog: var Prog, symCount: int) =
   let funcs = prog.funcs
   var varTyps = newSeq[Typ](symCount)
 
-  proc getTyp(expr: Expr): Typ =
+  proc inferTyps(expr: var Expr) =
     case expr.kind
-    of exprVar: varTyps[expr.v.id]
-    of exprLit: expr.typ
-    of exprPar: getTyp(expr.expr)
+    of exprVar: expr.typ = varTyps[expr.v.id]
+    of exprLit: discard
+    of exprPar:
+      inferTyps expr.expr
+      expr.typ = expr.expr.typ
 
     of exprArrayAcc:
-      let indexTyp = getTyp(expr.index)
-      assertEq indexTyp, typInt, expr.nimNode  #TODO: check actual typing rules
-      let arrTyp = getTyp(expr.arr)
-      case arrTyp.kind
-      of typArray: arrTyp.arrayTyp
-      of typVec: arrTyp.vecTyp
-      of typMat: newVecTyp(arrTyp.cols, typFloat)
-      else:
-        glslErr &"expected a vec, mat or array type but got `{arrTyp}`", expr.nimNode
+      inferTyps expr.index
+      assertEq expr.index.typ, typInt, expr.nimNode  #TODO: check actual typing rules
+      inferTyps expr.arr
+      expr.typ =
+        case expr.arr.typ.kind
+        of typArray: expr.arr.typ.arrayTyp
+        of typVec: expr.arr.typ.elemTyp
+        of typMat: newVecTyp(expr.arr.typ.cols, typFloat)
+        else:
+          glslErr &"expected a vec, mat or array type but got `{expr.arr.typ}`", expr.nimNode
 
     of exprFieldAcc:
       const swizzelFields = ["xyzw", "stpq", "rgba"]
-      let vecTyp = getTyp(expr.vec)
-      if vecTyp.kind == typVec:
+      inferTyps expr.vec
+      let typ = expr.vec.typ
+      if typ.kind == typVec:
         for fieldSet in swizzelFields:
           if expr.fields[0] in fieldSet:
             for field in expr.fields:
               let i = fieldSet.find(field)
               if i < 0:
                 glslErr &"unexpected `{field}` in swizzle", expr.nimNode
-              if i >= vecTyp.dim:
+              if i >= typ.dim:
                 glslErr &"field `{field}` is out of range", expr.nimNode
+            expr.typ =
+              if len(expr.fields) == 1: typ.elemTyp.asTyp
+              else: newVecTyp(len(expr.fields), typ.elemTyp)
             return
-              if len(expr.fields) == 1: vecTyp.vecTyp.asTyp
-              else: newVecTyp(len(expr.fields), vecTyp.vecTyp)
         glslErr &"unexpected `{expr.fields[0]}` in swizzle", expr.nimNode
-      glslErr &"expected a vec type but got `{vecTyp}`", expr.nimNode
+      glslErr &"expected a vec type but got `{typ}`", expr.nimNode
 
     of exprUnOp:
-      let typ = getTyp(expr.operand)
+      inferTyps expr.operand
+      expr.typ = expr.operand.typ
       if expr.unop == opNot:
-        assertEq typ, typBool, expr.nimNode
+        assertEq expr.typ, typBool, expr.nimNode
       else:
-        assertNumberTyp typ, expr.nimNode
-      typ
+        assertNumberTyp expr.typ, expr.nimNode
 
     of exprBinOp:
-      let ltyp = getTyp(expr.lop)
-      let rtyp = getTyp(expr.rop)
+      inferTyps expr.lop
+      inferTyps expr.rop
+      let ltyp = expr.lop.typ
+      let rtyp = expr.rop.typ
       case expr.binop
       of opAdd..opDiv:
         if expr.withAsgn: assertLVal expr.lop
         assertNumberTyp ltyp, rtyp, expr.nimNode
         for (atyp, btyp) in [(ltyp, rtyp), (rtyp, ltyp)]:
           if atyp.kind == typVec and btyp.kind == typBasic and atyp.vecTyp == btyp.typ:
-            return atyp
+            expr.typ = atyp
+            return
         if expr.binop == opMul:
           template checkMatVecMul(m, v, vecAxis, otherAxis) =
             if m.kind == typMat and v.kind == typVec and
                v.vecTyp == typFloat and v.dim == m.otherAxis:
-                  return newVecTyp(m.vecAxis, typFloat)
+                  expr.typ = newVecTyp(m.vecAxis, typFloat)
+                  return
           checkMatVecMul(ltyp, rtyp, cols, rows)
           checkMatVecMul(rtyp, ltyp, rows, cols)
-        tryUnify(expr.lop, ltyp, expr.rop, rtyp)
+        expr.typ = tryUnify(expr.lop, expr.rop)
       of opEq..opGe:
         for typ in [ltyp, rtyp]:
           if typ.kind != typBasic or typ.typ == typBool:
             glslErr "expected a number type", expr.nimNode
-        discard tryUnify(expr.lop, ltyp, expr.rop, rtyp)
-        typBool
+        discard tryUnify(expr.lop, expr.rop)
+        expr.typ = typBool
       of opAnd..opXor:
         assertEq ltyp, typBool, expr.nimNode
         assertEq rtyp, typBool, expr.nimNode
-        typBool
+        expr.typ = typBool
 
     of exprTernaryOp:
-      let condTyp = getTyp(expr.tcond)
-      let ifTyp = getTyp(expr.tif)
-      let elseTyp = getTyp(expr.telse)
-      if condTyp != typBool:
+      inferTyps expr.tcond
+      inferTyps expr.tif
+      inferTyps expr.telse
+      if expr.tcond.typ != typBool:
         typErr expr.tcond.typ, typBool, expr.nimNode
-      if ifTyp != elseTyp:
-        glslErr &"types of ternary branches dont match `{ifTyp}` != `{elseTyp}`", expr.nimNode
-      ifTyp
+      if expr.tif.typ != expr.telse.typ:
+        glslErr &"types of ternary branches dont match `{expr.tif.typ}` != `{expr.telse.typ}`", expr.nimNode
+      expr.typ = expr.tif.typ
 
     of exprCall:
-      let argTyps = expr.args.map(getTyp)
+      for arg in expr.args.mitems:
+        inferTyps arg
+      
+      let argTyps = expr.args.mapIt(it.typ)  #TODO
 
       # user defined
       if expr.funcName in funcs:
         for def in funcs[expr.funcName]:
           if len(def.params) == len(expr.args) and
              toSeq(0..<len(def.params)).allIt(def.params[it].typ == argTyps[it]):
-                return def.retTyp
+                expr.typ = def.retTyp
+                return
 
       # constructors
       let justOneBasicTyp = len(argTyps) == 1 and argTyps[0].kind == typBasic
@@ -226,61 +239,65 @@ proc inferTyps*(prog: var Prog, symCount: int) =
           of typMat: justOneBasicTyp or combVecDim >= typ.cols * typ.rows  #TODO: support diagonal construction
           else: false
         ):
-          return typ
+          expr.typ = typ
+          return
 
       # builtin
       if Some(@typ) ?= tryCallBuiltin(expr.funcName, argTyps):
-        return typ
+        expr.typ = typ
 
-      glslErr &"there is no `{expr.funcName}` with matching parameter types", expr.nimNode
+      else: glslErr &"there is no `{expr.funcName}` with matching parameter types", expr.nimNode
 
   proc inferTyps(stmts: var StmtList, retTyp: Typ) =
     for stmt in stmts.mitems:
       case stmt.kind
       of stmtExpr:
-        discard getTyp(stmt.expr)
+        inferTyps stmt.expr
 
       of stmtVarDef:
         if stmt.initVal != nil:
-          let valTyp = getTyp(stmt.initVal)
+          inferTyps stmt.initVal
+          let valTyp = stmt.initVal.typ
           if stmt.varTyp == nil:
             stmt.varTyp = valTyp
             varTyps[stmt.defVar.id] = valTyp
           else:
             varTyps[stmt.defVar.id] = stmt.varTyp
             if valTyp == stmt.varTyp: discard
-            elif valTyp.kind == stmt.varTyp.kind and valTyp.kind in {typBasic, typVec}:
+            elif valTyp.isConvertableTo(stmt.varTyp):
               stmt.initVal.convertTo(stmt.varTyp)
             else:
               typErr valTyp, stmt.varTyp, stmt.nimNode
 
       of stmtAsgn:
         assertLVal stmt.lval
-        assertEq getTyp(stmt.rval), getTyp(stmt.lval), stmt.nimNode
+        inferTyps stmt.lval
+        inferTyps stmt.rval
+        assertEq stmt.lval.typ, stmt.rval.typ, stmt.nimNode
 
       of stmtReturn:
-        assertEq getTyp(stmt.ret), retTyp, stmt.nimNode
+        inferTyps stmt.ret
+        assertEq stmt.ret.typ, retTyp, stmt.nimNode
 
       of stmtIf:
         for branch in stmt.elifBranches.mitems:
-          let condTyp = getTyp(branch.cond)
-          if condTyp != typBool:
-            typErr condTyp, typBool, stmt.nimNode
+          inferTyps branch.cond
+          if branch.cond.typ != typBool:
+            typErr branch.cond.typ, typBool, stmt.nimNode
           inferTyps branch.body, retTyp
         inferTyps stmt.elseBranch, retTyp
 
       of stmtWhile:
-        let condTyp = getTyp(stmt.whileCond)
-        if condTyp != typBool:
-          typErr condTyp, typBool, stmt.nimNode
+        inferTyps stmt.whileCond
+        if stmt.whileCond.typ != typBool:
+          typErr stmt.whileCond.typ, typBool, stmt.nimNode
         inferTyps stmt.whileBody, retTyp
 
       of stmtFor:
         assert stmt.forVarTyp == nil
-        stmt.forVarTyp = tryUnify(
-          stmt.forRange.a, getTyp(stmt.forRange.a),
-          stmt.forRange.b, getTyp(stmt.forRange.b)
-        )
+        inferTyps stmt.forRange.a
+        inferTyps stmt.forRange.b
+        stmt.forVarTyp = tryUnify(stmt.forRange.a, stmt.forRange.b)
         varTyps[stmt.forVar.id] = stmt.forVarTyp
         if stmt.forVarTyp.kind != typBasic or stmt.forVarTyp.typ == typBool:
           glslErr &"expected a number type for a for-loop range, but got `{stmt.forVarTyp}`", stmt.nimNode
