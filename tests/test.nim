@@ -43,7 +43,7 @@ let exampleShader = shader:
     if dot(viewDir, reflected) > 0.9:
       finalColor = vec4(highlightColor, 1)
 
-    let shadow = clamp(dot(-lightDir, fragNormal), 0.0, 1.0)
+    let shadow = clamp(dot(-lightDir, fragNormal), 0, 1)
     finalColor = mix(vec4(shadowColor, 1), finalColor, shadow)
 
 debugEcho "\n", exampleShader, "\n"

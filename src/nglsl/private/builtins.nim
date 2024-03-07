@@ -8,7 +8,7 @@
 
 import std/[macros, options, tables]
 import fusion/matching
-import ./typs
+import ./typs, ./ast
 
 
 type
@@ -54,39 +54,46 @@ macro `->`(lhs: untyped, retTyp: PolyVecParamTyp): PolyVecFuncTyp =
   quote do:
     pvFuncTyp(`dims`, @`params`, `retTyp`)
 
-func match(argTyps: seq[Typ], funcTyp: PolyVecFuncTyp): Option[Typ] =   #TODO: handle conversion of args  (`tyUnify`)
-  if len(argTyps) != len(funcTyp.params): return
+func match(args: var seq[Expr], funcTyp: PolyVecFuncTyp): Option[Typ] =   #TODO: handle conversion of args  (`tyUnify`)
+  if len(args) != len(funcTyp.params): return
 
   var dim = -1
   var vecTyp: Option[BasicTyp]
+  var conversions: seq[tuple[argId: int, typ: Typ]]  # to defer conversions after func id completely checked
 
-  for i, paramTyp in funcTyp.params:
-    let argTyp = argTyps[i]
+  for i, arg in args.mpairs:
+    let paramTyp = funcTyp.params[i]
 
     template checkDim =
       if dim == -1:
-        dim = argTyp.dim
+        dim = arg.typ.dim
         if dim notin funcTyp.allowedDims: return
-      elif argTyp.dim != dim: return
+      elif arg.typ.dim != dim: return
 
     case paramTyp.kind
     of specificTyp:
-      if paramTyp.typ != argTyp: return
+      if arg.typ.isConvertableTo(paramTyp.typ):
+        conversions &= (i, paramTyp.typ)
+      else: return
 
     of polyDimVec:
-      if argTyp.kind in {typBasic, typVec} and
-         argTyp.elemTyp == paramTyp.elemTyp:
+      if arg.typ.kind in {typBasic, typVec} and
+         arg.typ.elemTyp.isConvertableTo(paramTyp.elemTyp):
           checkDim()
+          conversions &= (i, newVecTyp(dim, paramTyp.elemTyp))
       else: return
 
     of fullPolyVec:
-      if argTyp.kind in {typBasic, typVec}:
+      if arg.typ.kind in {typBasic, typVec}:
         checkDim()
         if Some(@vecTyp) ?= vecTyp:
-          if argTyp.elemTyp != vecTyp: return
+          if arg.typ.elemTyp != vecTyp: return
         else:
-          vecTyp = some(argTyp.elemTyp)
+          vecTyp = some(arg.typ.elemTyp)
       else: return
+
+  for (i, typ) in conversions:
+    args[i].convertTo(typ)
 
   some:
     case funcTyp.ret.kind
@@ -182,8 +189,8 @@ let builtinFuncs {.compiletime.} = toTable {
   ],
 }
 
-proc tryCallBuiltin*(funcName: string, argTyps: seq[Typ]): Option[Typ] =
+proc tryCallBuiltin*(funcName: string, args: var seq[Expr]): Option[Typ] =
   if funcName in builtinFuncs:
     for funcTyp in builtinFuncs[funcName]:
-      result = match(argTyps, funcTyp)
+      result = match(args, funcTyp)
       if result.isSome: break

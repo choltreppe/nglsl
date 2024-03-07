@@ -211,23 +211,21 @@ proc inferTyps*(prog: var Prog, symCount: int) =
     of exprCall:
       for arg in expr.args.mitems:
         inferTyps arg
-      
-      let argTyps = expr.args.mapIt(it.typ)  #TODO
 
       # user defined
       if expr.funcName in funcs:
         for def in funcs[expr.funcName]:
           if len(def.params) == len(expr.args) and
-             toSeq(0..<len(def.params)).allIt(def.params[it].typ == argTyps[it]):
+             toSeq(0..<len(def.params)).allIt(def.params[it].typ == expr.args[it].typ):
                 expr.typ = def.retTyp
                 return
 
       # constructors
-      let justOneBasicTyp = len(argTyps) == 1 and argTyps[0].kind == typBasic
+      let justOneBasicTyp = len(expr.args) == 1 and expr.args[0].typ.kind == typBasic
       var combVecDim = 0  # -1 if not just vecs and basics
-      for argTyp in argTyps:
-        if argTyp.kind in {typBasic, typVec}:
-          combVecDim += argTyp.dim
+      for arg in expr.args:
+        if arg.typ.kind in {typBasic, typVec}:
+          combVecDim += arg.typ.dim
         else:
           combVecDim = -1
           break
@@ -243,7 +241,7 @@ proc inferTyps*(prog: var Prog, symCount: int) =
           return
 
       # builtin
-      if Some(@typ) ?= tryCallBuiltin(expr.funcName, argTyps):
+      if Some(@typ) ?= tryCallBuiltin(expr.funcName, expr.args):
         expr.typ = typ
 
       else: glslErr &"there is no `{expr.funcName}` with matching parameter types", expr.nimNode
