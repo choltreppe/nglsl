@@ -6,6 +6,8 @@
 #    distribution, for details about the copyright.
 #
 
+import std/macros
+
 template glslErr*(msg: string, node: NimNode) =
   error "[GLSL] "&msg, node
   return

@@ -6,7 +6,8 @@
 #    distribution, for details about the copyright.
 #
 
-import std/[macros, sugar, sequtils, strutils, strformat, tables]
+import std/[macros, sugar, sequtils, strutils, strformat, tables, options]
+import fusion/matching
 import ./utils, ./ast, ./typs
 
 
@@ -169,6 +170,40 @@ proc parseStmts(
           parseStmts(stmt.elseBranch, node[0])
         else: assert false
       stmt
+
+    of nnkWhileStmt:
+      var stmt = Stmt(
+        kind: stmtWhile,
+        whileCond: parseExpr(node[0])
+      )
+      parseStmts(stmt.whileBody, node[1])
+      stmt
+
+    of nnkForStmt:
+      proc getForRange(node: NimNode): Option[ForRange] =
+        if node.kind == nnkInfix:
+          return some(ForRange(
+            inclusive: (
+              case node[0].strVal
+              of "..": true
+              of "..<": false
+              else: return
+            ),
+            a: parseExpr(node[1]),
+            b: parseExpr(node[2])
+          ))
+      if Some(@r) ?= getForRange(node[^2]):
+        if len(node) > 3:
+          glslErr "wrong amount of variables. expect 1 for a range loop", node
+        var stmt = Stmt(
+          kind: stmtFor,
+          forVar: newVar(node[0].identStr),
+          forRange: r
+        )
+        parseStmts(stmt.forBody, node[^1])
+        stmt
+      else:
+        glslErr "only for loops over ranges (`..` or `..<`) are supported", node
 
     else: Stmt(kind: stmtExpr, expr: parseExpr(node))
 

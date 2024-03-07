@@ -54,7 +54,7 @@ macro `->`(lhs: untyped, retTyp: PolyVecParamTyp): PolyVecFuncTyp =
   quote do:
     pvFuncTyp(`dims`, @`params`, `retTyp`)
 
-func match(argTyps: seq[Typ], funcTyp: PolyVecFuncTyp): Option[Typ] =
+func match(argTyps: seq[Typ], funcTyp: PolyVecFuncTyp): Option[Typ] =   #TODO: handle conversion of args  (`tyUnify`)
   if len(argTyps) != len(funcTyp.params): return
 
   var dim = -1

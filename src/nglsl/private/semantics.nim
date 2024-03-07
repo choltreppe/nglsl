@@ -79,6 +79,15 @@ proc bindSyms*(prog: var Prog): int =  # returns sym count
           bindSyms(body, symIds)
         bindSyms(stmt.elseBranch, symIds)
 
+      of stmtWhile:
+        bindSyms(stmt.whileCond, symIds)
+        bindSyms(stmt.whileBody, symIds)
+
+      of stmtFor:
+        var symIds = symIds
+        symIds.addVar stmt.forVar
+        bindSyms(stmt.forBody, symIds)
+
   var symIds: Table[string, int]
   for def in prog.toplevelDefs.mitems:
     symIds.addVar def.v
@@ -102,58 +111,6 @@ proc assertLVal(expr: Expr) =
   of exprLit, exprCall, exprTernaryOp, exprUnOp, exprBinOp:
     glslErr &"`{expr}` is not a l-value", expr.nimNode
   else: discard
-
-template typErr(a, b: Typ, node: NimNode) =
-  glslErr "types dont match: `" & $a & "` and `" & $b & "`", node
-
-template assertEq(a, b: Typ, node: NimNode) =
-  if a != b: typErr a, b, node
-
-# is a number or some container of one ?
-proc assertNumberTyp(typs: varargs[Typ], node: NimNode) =
-  const msg = "expected a number type or a vec/mat/array of one"
-  for typ in typs:
-    case typ.kind
-    of typBasic:
-      if typ.typ == typBool:
-        glslErr msg, node
-    of typVec:
-      assertNumberTyp typ.vecTyp, node
-    of typMat: discard
-    of typArray:
-      assertNumberTyp typ.arrayTyp, node
-    else:
-      glslErr msg, node
-
-proc convertTo(expr: var Expr, typ: Typ) = 
-  if typ.kind == typBasic and expr.kind == exprLit:
-    macro genConversions: string =
-      result = nnkIfStmt.newTree()
-      for fromTyp in typBool..typFloat:
-        let parseProc = ident("parse" & $fromTyp)
-        for toTyp in typBool..typFloat:
-          let castProc = ident($toTyp)
-          let cond = quote do: expr.typ == `fromTyp` and typ == `toTyp`
-          let body = quote do: $`castProc`(`parseProc`(expr.val))
-          result.add nnkElifBranch.newTree(cond, body)
-      result.add nnkElse.newTree(newLit(""))  # should not happen
-    expr = Expr(
-      kind: exprLit,
-      typ: typ.typ,
-      val: genConversions()
-    )
-  else:
-    expr = Expr(kind: exprCall, funcName: $typ, args: @[expr])
-
-proc tryUnify(a: var Expr, atyp: Typ, b: var Expr, btyp: Typ): Typ =
-  if atyp == btyp: atyp
-  elif atyp.kind == btyp.kind and atyp.kind in {typBasic, typVec}:
-    if atyp.elemTyp > btyp.elemTyp:
-       b.convertTo(atyp); atyp
-    else:
-       a.convertTo(btyp); btyp
-  else:
-    typErr atyp, btyp, a.nimNode
 
 
 proc inferTyps*(prog: var Prog, symCount: int) =
@@ -210,6 +167,9 @@ proc inferTyps*(prog: var Prog, symCount: int) =
       of opAdd..opDiv:
         if expr.withAsgn: assertLVal expr.lop
         assertNumberTyp ltyp, rtyp, expr.nimNode
+        for (atyp, btyp) in [(ltyp, rtyp), (rtyp, ltyp)]:
+          if atyp.kind == typVec and btyp.kind == typBasic and atyp.vecTyp == btyp.typ:
+            return atyp
         if expr.binop == opMul:
           template checkMatVecMul(m, v, vecAxis, otherAxis) =
             if m.kind == typMat and v.kind == typVec and
@@ -308,6 +268,23 @@ proc inferTyps*(prog: var Prog, symCount: int) =
             typErr condTyp, typBool, stmt.nimNode
           inferTyps branch.body, retTyp
         inferTyps stmt.elseBranch, retTyp
+
+      of stmtWhile:
+        let condTyp = getTyp(stmt.whileCond)
+        if condTyp != typBool:
+          typErr condTyp, typBool, stmt.nimNode
+        inferTyps stmt.whileBody, retTyp
+
+      of stmtFor:
+        assert stmt.forVarTyp == nil
+        stmt.forVarTyp = tryUnify(
+          stmt.forRange.a, getTyp(stmt.forRange.a),
+          stmt.forRange.b, getTyp(stmt.forRange.b)
+        )
+        varTyps[stmt.forVar.id] = stmt.forVarTyp
+        if stmt.forVarTyp.kind != typBasic or stmt.forVarTyp.typ == typBool:
+          glslErr &"expected a number type for a for-loop range, but got `{stmt.forVarTyp}`", stmt.nimNode
+        inferTyps stmt.forBody, retTyp
 
   for def in prog.toplevelDefs:
     varTyps[def.v.id] = def.typ

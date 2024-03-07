@@ -6,8 +6,8 @@
 #    distribution, for details about the copyright.
 #
 
-import std/[sequtils, strutils, strformat, tables]
-import ./typs
+import std/[macros, sequtils, strutils, strformat, tables]
+import ./utils, ./typs
 
 
 type
@@ -78,7 +78,11 @@ type
 
     nimNode*: NimNode
 
-  StmtKind* = enum stmtExpr, stmtVarDef, stmtAsgn, stmtReturn, stmtIf
+  ForRange* = object
+    a*, b*: Expr
+    inclusive*: bool
+
+  StmtKind* = enum stmtExpr, stmtVarDef, stmtAsgn, stmtReturn, stmtIf, stmtWhile, stmtFor
   Stmt* = ref object
     case kind*: StmtKind
     of stmtExpr: expr*: Expr
@@ -100,6 +104,16 @@ type
         body: StmtList
       ]]
       elseBranch*: StmtList  # empty if none
+
+    of stmtWhile:
+      whileCond*: Expr
+      whileBody*: StmtList
+
+    of stmtFor:
+      forVar*: Var
+      forVarTyp*: Typ
+      forRange*: ForRange
+      forBody*: StmtList
     
     nimNode*: NimNode
 
@@ -109,6 +123,59 @@ type
     toplevelDefs*: seq[QualifiedVarDef]
     funcs*: FuncTable
     stmts*: StmtList
+
+
+template typErr*(a, b: Typ, node: NimNode) =
+  glslErr "types dont match: `" & $a & "` and `" & $b & "`", node
+
+template assertEq*(a, b: Typ, node: NimNode) =
+  if a != b: typErr a, b, node
+
+# is a number or some container of one ?
+proc assertNumberTyp*(typs: varargs[Typ], node: NimNode) =
+  const msg = "expected a number type or a vec/mat/array of one"
+  for typ in typs:
+    case typ.kind
+    of typBasic:
+      if typ.typ == typBool:
+        glslErr msg, node
+    of typVec:
+      assertNumberTyp typ.vecTyp, node
+    of typMat: discard
+    of typArray:
+      assertNumberTyp typ.arrayTyp, node
+    else:
+      glslErr msg, node
+
+proc convertTo*(expr: var Expr, typ: Typ) = 
+  if typ.kind == typBasic and expr.kind == exprLit:
+    macro genConversions: string =
+      result = nnkIfStmt.newTree()
+      for fromTyp in typBool..typFloat:
+        let parseProc = ident("parse" & $fromTyp)
+        for toTyp in typBool..typFloat:
+          let castProc = ident($toTyp)
+          let cond = quote do: expr.typ == `fromTyp` and typ == `toTyp`
+          let body = quote do: $`castProc`(`parseProc`(expr.val))
+          result.add nnkElifBranch.newTree(cond, body)
+      result.add nnkElse.newTree(newLit(""))  # should not happen
+    expr = Expr(
+      kind: exprLit,
+      typ: typ.typ,
+      val: genConversions()
+    )
+  else:
+    expr = Expr(kind: exprCall, funcName: $typ, args: @[expr])
+
+proc tryUnify*(a: var Expr, atyp: Typ, b: var Expr, btyp: Typ): Typ =
+  if atyp == btyp: atyp
+  elif atyp.kind == btyp.kind and atyp.kind in {typBasic, typVec}:
+    if atyp.elemTyp > btyp.elemTyp:
+       b.convertTo(atyp); atyp
+    else:
+       a.convertTo(btyp); btyp
+  else:
+    typErr atyp, btyp, a.nimNode
 
 
 func `$`(v: Var): string {.inline.} =
@@ -179,7 +246,19 @@ proc genCode*(prog: Prog): string =
           gen(stmt.elseBranch, indent+1)
           addLine "}"
 
-  code &= "#version 410\n"
+      of stmtWhile:
+        addLine &"while({stmt.whileCond}) {{"
+        gen(stmt.whileBody, indent+1)
+        addLine "}"
+
+      of stmtFor:
+        let v = stmt.forVar
+        let cmpOp = if stmt.forRange.inclusive: "<=" else: "<"
+        addLine &"for({genVarDef(v, stmt.forVarTyp)} = {stmt.forRange.a}; {v} {cmpOp} {stmt.forRange.b}; ++{v}) {{"
+        gen(stmt.forBody, indent+1)
+        addLine "}"
+
+  code &= "#version 410\nprecision highp float;\n"
 
   for def in prog.toplevelDefs:
     code &= "\n"&gen(def)&";"
