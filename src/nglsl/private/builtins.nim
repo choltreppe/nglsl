@@ -194,3 +194,17 @@ proc tryCallBuiltin*(funcName: string, args: var seq[Expr]): Option[Typ] =
     for funcTyp in builtinFuncs[funcName]:
       result = match(args, funcTyp)
       if result.isSome: break
+
+
+
+let builtinVars* {.compiletime.}: seq[tuple[name: string, typ: Typ]] = @{
+  "gl_Position": newVecTyp(4, typFloat),
+  "gl_PointSize": typFloat.asTyp,
+
+  "gl_FragCoord": newVecTyp(4, typFloat),
+  "gl_FrontFacing": typBool.asTyp,
+  "gl_PointCoord": newVecTyp(2, typFloat),
+  
+  "gl_FragColor": newVecTyp(4, typFloat)
+  #TODO: gl_FragCoordData  (needs dyn array type)
+}

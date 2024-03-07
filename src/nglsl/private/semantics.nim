@@ -11,8 +11,14 @@ import fusion/matching
 import ./utils, ./ast, ./typs, ./builtins
 
 
+let builtinVarIds {.compiletime.} = block:
+  var res: Table[string, int]
+  for i, (name, _) in builtinVars:
+    res[name] = i
+  res
+
 proc bindSyms*(prog: var Prog): int =  # returns sym count
-  var nextSymId = 0
+  var nextSymId = len(builtinVars)
   proc addVar(symIds: var Table[string, int], v: var Var) =
     v.id = nextSymId
     symIds[v.name] = nextSymId
@@ -88,7 +94,7 @@ proc bindSyms*(prog: var Prog): int =  # returns sym count
         symIds.addVar stmt.forVar
         bindSyms(stmt.forBody, symIds)
 
-  var symIds: Table[string, int]
+  var symIds = builtinVarIds
   for def in prog.toplevelDefs.mitems:
     symIds.addVar def.v
 
@@ -113,9 +119,12 @@ proc assertLVal(expr: Expr) =
   else: discard
 
 
+let builtinVarTyps {.compiletime.} = builtinVars.mapIt(it.typ)
+
 proc inferTyps*(prog: var Prog, symCount: int) =
   let funcs = prog.funcs
-  var varTyps = newSeq[Typ](symCount)
+  var varTyps = builtinVarTyps
+  varTyps.setLen symCount
 
   proc inferTyps(expr: var Expr) =
     case expr.kind

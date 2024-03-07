@@ -28,7 +28,18 @@ let testShader = shader:
 debugEcho "\n", testShader, "\n"
 
 
-let exampleShader = shader:
+let exampleVertShader = shader:
+  var
+    vertexPosition, vertexNormal: Vec3
+    mvp, matModel, matNormal: uniform Mat4
+    fragPosition, fragNormal: out Vec3
+
+  proc main =
+    fragPosition = vec3(matModel * vec4(vertexPosition, 1.0))
+    fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 1.0)))
+    gl_Position = mvp * vec4(vertexPosition, 1.0)
+
+let exampleFragShader = shader:
   var 
     fragPosition, fragNormal: Vec3
     viewPos, lightDir, baseColor, shadowColor, highlightColor: uniform Vec3
@@ -46,4 +57,5 @@ let exampleShader = shader:
     let shadow = clamp(dot(-lightDir, fragNormal), 0, 1)
     finalColor = mix(vec4(shadowColor, 1), finalColor, shadow)
 
-debugEcho "\n", exampleShader, "\n"
+debugEcho "\n", exampleVertShader, "\n"
+debugEcho "\n", exampleFragShader, "\n"

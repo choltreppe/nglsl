@@ -134,11 +134,11 @@ proc parseTyp*(node: NimNode): Typ =
   case node.kind
   of nnkIdent:
     let name = node.repr
-    if Some(@typ) ?= parseTyp(name.nimIdentNormalize): typ
+    if Some(@typ) ?= parseTyp(name): typ
     else: glslErr &"unknown type `{name}`", node
   
   of nnkBracketExpr:
-    let baseName = node[0].repr.nimIdentNormalize
+    let baseName = node[0].repr
     if baseName == "array":
       if len(node) != 3:
         glslErr &"`array` expects exactly 2 generic parameters", node

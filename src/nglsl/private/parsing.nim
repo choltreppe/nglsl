@@ -11,10 +11,6 @@ import fusion/matching
 import ./utils, ./ast, ./typs
 
 
-func identStr(n: NimNode): string {.inline.} =
-  assert n.kind == nnkIdent
-  n.strVal.nimIdentNormalize
-
 func newVar(name: string): Var {.inline.} = Var(name: name)
 
 proc parseExpr(node: NimNode): Expr =
@@ -23,7 +19,7 @@ proc parseExpr(node: NimNode): Expr =
     of nnkIntLit: Expr(kind: exprLit, typ: typInt, val: node.repr)
     of nnkFloatLit: Expr(kind: exprLit, typ: typFloat, val: node.repr)
     of nnkIdent:
-      let name = node.identStr
+      let name = node.strVal
       if name in ["true", "false"]:  Expr(kind: exprLit, typ: typBool, val: name)
       
       else: Expr(kind: exprVar, v: newVar(name))
@@ -35,7 +31,7 @@ proc parseExpr(node: NimNode): Expr =
         else:
           (node[0], node[1..^1])
       nameNode.expectKind {nnkIdent, nnkSym}
-      let name = nameNode.identStr
+      let name = nameNode.strVal
       Expr(
         kind: exprCall,
         funcName: name,
@@ -146,7 +142,7 @@ proc parseStmts(
         for v in node[0 ..< ^2]:
           stmts &= Stmt(
             kind: stmtVarDef,
-            defVar: newVar(v.identStr),
+            defVar: newVar(v.strVal),
             varTyp: typ,
             initVal: val,
             nimNode: node
@@ -197,7 +193,7 @@ proc parseStmts(
           glslErr "wrong amount of variables. expect 1 for a range loop", node
         var stmt = Stmt(
           kind: stmtFor,
-          forVar: newVar(node[0].identStr),
+          forVar: newVar(node[0].strVal),
           forRange: r
         )
         parseStmts(stmt.forBody, node[^1])
@@ -228,13 +224,13 @@ proc parse*(node: NimNode): Prog =
         for name in defs[0 ..< ^2]:
           result.toplevelDefs.add QualifiedVarDef(
             quali: quali,
-            v: newVar(name.identStr),
+            v: newVar(name.strVal),
             typ: typ
           )
 
     of nnkProcDef, nnkFuncDef:
       node[4].expectKind nnkEmpty
-      let name = node.name.identStr
+      let name = node.name.strVal
       let params = node[3]
       var funcDef = FuncDef(
         retTyp: parseTyp(params[0]),
@@ -247,7 +243,7 @@ proc parse*(node: NimNode): Prog =
               for v in defs[0 ..< ^2]:
                 QualifiedVarDef(
                   quali: qualiIn, #TODO
-                  v: newVar(v.identStr),
+                  v: newVar(v.strVal),
                   typ: typ
                 )
           )
