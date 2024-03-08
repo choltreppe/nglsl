@@ -11,3 +11,7 @@ import std/macros
 template glslErr*(msg: string, node: NimNode) =
   error "[GLSL] "&msg, node
   return
+
+template glslErr*(msg: string, lineInfo: string) =
+  echo lineInfo, " Error: [GLSL] ", msg
+  quit 1

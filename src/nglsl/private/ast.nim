@@ -75,7 +75,7 @@ type
     of exprPar: expr*: Expr
 
     typ*: Typ
-    nimNode*: NimNode
+    lineInfo*: string
 
   ForRange* = object
     a*, b*: Expr
@@ -114,7 +114,7 @@ type
       forRange*: ForRange
       forBody*: StmtList
     
-    nimNode*: NimNode
+    lineInfo*: string
 
   StmtList* = seq[Stmt]
 
@@ -124,27 +124,27 @@ type
     stmts*: StmtList
 
 
-template typErr*(a, b: Typ, node: NimNode) =
-  glslErr "types dont match: `" & $a & "` and `" & $b & "`", node
+template typErr*(a, b: Typ, lineInfo: string) =
+  glslErr "types dont match: `" & $a & "` and `" & $b & "`", lineInfo
 
-template assertEq*(a, b: Typ, node: NimNode) =
-  if a != b: typErr a, b, node
+template assertEq*(a, b: Typ, lineInfo: string) =
+  if a != b: typErr a, b, lineInfo
 
 # is a number or some container of one ?
-proc assertNumberTyp*(typs: varargs[Typ], node: NimNode) =
+proc assertNumberTyp*(typs: varargs[Typ], lineInfo: string) =
   const msg = "expected a number type or a vec/mat/array of one"
   for typ in typs:
     case typ.kind
     of typBasic:
       if typ.typ == typBool:
-        glslErr msg, node
+        glslErr msg, lineInfo
     of typVec:
-      assertNumberTyp typ.vecTyp, node
+      assertNumberTyp typ.vecTyp, lineInfo
     of typMat: discard
     of typArray:
-      assertNumberTyp typ.arrayTyp, node
+      assertNumberTyp typ.arrayTyp, lineInfo
     else:
-      glslErr msg, node
+      glslErr msg, lineInfo
 
 func isConvertableTo*(a, b: Typ): bool =
   a.kind == b.kind and a.kind in {typBasic, typVec} and a.elemTyp != typBool
@@ -177,7 +177,7 @@ proc tryUnify*(a: var Expr, b: var Expr): Typ =
     else:
        a.convertTo(b.typ); b.typ
   else:
-    typErr a.typ, b.typ, a.nimNode
+    typErr a.typ, b.typ, a.lineInfo
 
 
 func `$`(v: Var): string {.inline.} =

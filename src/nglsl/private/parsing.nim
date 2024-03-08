@@ -14,6 +14,8 @@ import ./utils, ./ast, ./typs
 func newVar(name: string): Var {.inline.} = Var(name: name)
 
 proc parseExpr(node: NimNode): Expr =
+  let lineInfo = node.lineInfo
+
   result =
     case node.kind
     of nnkIntLit: Expr(kind: exprLit, typ: typInt, val: node.repr)
@@ -65,7 +67,7 @@ proc parseExpr(node: NimNode): Expr =
           binop: op,
           lop: parseExpr(node[1]),
           rop: parseExpr(node[2]),
-          nimNode: node
+          lineInfo: lineInfo
         )
       let opStr = node[0].strVal
       let op =
@@ -107,14 +109,15 @@ proc parseExpr(node: NimNode): Expr =
         glslErr "statement-list expressions are not supported", node
     
     else:
-      glslErr "TODO: " & $node.kind, node
+      glslErr "unsupported syntax", node
 
-  result.nimNode = node
+  result.lineInfo = lineInfo
 
 proc parseStmts(
   stmts: var StmtList,
   node: NimNode
 ) =
+  let lineInfo = node.lineInfo
   var newStmt =
     case node.kind
     of nnkStmtList:
@@ -145,7 +148,7 @@ proc parseStmts(
             defVar: newVar(v.strVal),
             varTyp: typ,
             initVal: val,
-            nimNode: node
+            lineInfo: lineInfo
           )
       return
 
@@ -203,7 +206,7 @@ proc parseStmts(
 
     else: Stmt(kind: stmtExpr, expr: parseExpr(node))
 
-  newStmt.nimNode = node
+  newStmt.lineInfo = lineInfo
   stmts.add newStmt
 
 proc parse*(node: NimNode): Prog =
