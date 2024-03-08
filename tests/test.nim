@@ -1,7 +1,7 @@
 import nglsl
 
 
-let testShader = shader:
+let testShader = glsl:
   var
     a, b, x: Vec3
     texMap: uniform Sampler2D
@@ -28,7 +28,7 @@ let testShader = shader:
 debugEcho "\n", testShader, "\n"
 
 
-let exampleVertShader = shader:
+let exampleVertShader = glsl:
   var
     vertexPosition, vertexNormal: Vec3
     mvp, matModel, matNormal: uniform Mat4
@@ -39,7 +39,7 @@ let exampleVertShader = shader:
     fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 1.0)))
     gl_Position = mvp * vec4(vertexPosition, 1.0)
 
-let exampleFragShader = shader:
+let exampleFragShader = glsl:
   var 
     fragPosition, fragNormal: Vec3
     viewPos, lightDir, baseColor, shadowColor, highlightColor: uniform Vec3

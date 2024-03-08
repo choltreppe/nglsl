@@ -10,7 +10,7 @@ import std/macros
 import ./nglsl/private/[ast, parsing, semantics]
 
 
-macro shader*(body: untyped): string =
+macro glsl*(body: untyped): string =
   var prog = parse(body)
   let symCount = bindSyms(prog)
   inferTyps(prog, symCount)

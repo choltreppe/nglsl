@@ -12,39 +12,41 @@ import ./typs, ./ast
 
 
 type
-  PolyVecParamTypKind = enum specificTyp, polyDimVec, fullPolyVec
-  PolyVecParamTyp = object
-    case kind: PolyVecParamTypKind
+  PolyParamTypKind = enum specificTyp, polyDimVec, fullPoly, polyDimSampler
+  PolyParamTyp = object
+    case kind: PolyParamTypKind
     of specificTyp: typ: Typ
     of polyDimVec: elemTyp: BasicTyp 
-    of fullPolyVec: discard
+    of fullPoly, polyDimSampler: discard
 
-  PolyVecFuncTyp = object
+  PolyFuncTyp = object
     allowedDims: Slice[int]
-    params: seq[PolyVecParamTyp]
-    ret: PolyVecParamTyp
+    params: seq[PolyParamTyp]
+    ret: PolyParamTyp
 
-func polyVec: PolyVecParamTyp {.inline.} =
-  PolyVecParamTyp(kind: fullPolyVec)
+func polyVec: PolyParamTyp {.inline.} =
+  PolyParamTyp(kind: fullPoly)
 
-func polyVec(typ: BasicTyp): PolyVecParamTyp {.inline.} =
-  PolyVecParamTyp(kind: polyDimVec, elemTyp: typ)
+func polyVec(typ: BasicTyp): PolyParamTyp {.inline.} =
+  PolyParamTyp(kind: polyDimVec, elemTyp: typ)
 
-converter asPolyTyp(typ: Typ): PolyVecParamTyp =
-  PolyVecParamTyp(kind: specificTyp, typ: typ)
+let polySampler {.compiletime.} = PolyParamTyp(kind: polyDimSampler)
 
-converter asPolyTyp(typ: BasicTyp): PolyVecParamTyp = typ.asTyp.asPolyTyp
+converter asPolyTyp(typ: Typ): PolyParamTyp =
+  PolyParamTyp(kind: specificTyp, typ: typ)
 
-template asPolyTyp(typ: PolyVecParamTyp): PolyVecParamTyp = typ
+converter asPolyTyp(typ: BasicTyp): PolyParamTyp = typ.asTyp.asPolyTyp
+
+template asPolyTyp(typ: PolyParamTyp): PolyParamTyp = typ
 
 func pvFuncTyp(
   dims: Slice[int],
-  params: seq[PolyVecParamTyp],
-  ret: PolyVecParamTyp
-): PolyVecFuncTyp {.inline.} =
-  PolyVecFuncTyp(allowedDims: dims, params: params, ret: ret)
+  params: seq[PolyParamTyp],
+  ret: PolyParamTyp
+): PolyFuncTyp {.inline.} =
+  PolyFuncTyp(allowedDims: dims, params: params, ret: ret)
 
-macro `->`(lhs: untyped, retTyp: PolyVecParamTyp): PolyVecFuncTyp =
+macro `->`(lhs: untyped, retTyp: PolyParamTyp): PolyFuncTyp =
   lhs.expectKind nnkCall
   lhs[0].expectKind nnkBracket
   let dims = lhs[0][0]
@@ -54,7 +56,7 @@ macro `->`(lhs: untyped, retTyp: PolyVecParamTyp): PolyVecFuncTyp =
   quote do:
     pvFuncTyp(`dims`, @`params`, `retTyp`)
 
-func match(args: var seq[Expr], funcTyp: PolyVecFuncTyp): Option[Typ] =   #TODO: handle conversion of args  (`tyUnify`)
+func match(args: var seq[Expr], funcTyp: PolyFuncTyp): Option[Typ] =   #TODO: handle conversion of args  (`tyUnify`)
   if len(args) != len(funcTyp.params): return
 
   var dim = -1
@@ -83,13 +85,17 @@ func match(args: var seq[Expr], funcTyp: PolyVecFuncTyp): Option[Typ] =   #TODO:
           conversions &= (i, newVecTyp(dim, paramTyp.elemTyp))
       else: return
 
-    of fullPolyVec:
+    of fullPoly:
       if arg.typ.kind in {typBasic, typVec}:
         checkDim()
         if Some(@vecTyp) ?= vecTyp:
           if arg.typ.elemTyp != vecTyp: return
         else:
           vecTyp = some(arg.typ.elemTyp)
+      else: return
+
+    of polyDimSampler:
+      if arg.typ.kind == typSampler: checkDim()
       else: return
 
   for (i, typ) in conversions:
@@ -99,7 +105,8 @@ func match(args: var seq[Expr], funcTyp: PolyVecFuncTyp): Option[Typ] =   #TODO:
     case funcTyp.ret.kind
     of specificTyp: funcTyp.ret.typ
     of polyDimVec: newVecTyp(dim, funcTyp.ret.elemTyp)
-    of fullPolyVec: newVecTyp(dim, vecTyp.get)
+    of fullPoly: newVecTyp(dim, vecTyp.get)
+    of polyDimSampler: newSamplerTyp(dim)
 
 
 let polyFloatVec {.compiletime.} = polyVec(typFloat)
@@ -179,14 +186,14 @@ let builtinFuncs {.compiletime.} = toTable {
   "all": @[ [2..4](polyVec(typBool)) -> typBool ],
   # TODO not func (is not that simple because `not` is an operator in nimified version)
 
-  "texture2DLod": @[
-    [2..2](newSamplerTyp(2), newVecTyp(2, typFloat)) -> newVecTyp(4, typFloat),
-    [2..2](newSamplerTyp(2), newVecTyp(2, typFloat), typFloat) -> newVecTyp(4, typFloat)
+  "texture": @[
+    [1..1](newSamplerTyp(1), typFloat) -> newVecTyp(4, typFloat),
+    [2..3](polySampler, polyVec(typFloat)) -> newVecTyp(4, typFloat)
   ],
-  "texture2DLodProj": @[
-    [3..4](newSamplerTyp(2), polyVec(typFloat)) -> newVecTyp(4, typFloat),
-    [3..4](newSamplerTyp(2), polyVec(typFloat), typFloat) -> newVecTyp(4, typFloat)
-  ],
+  "textureLod": @[
+    [1..1](newSamplerTyp(1), typFloat, typFloat) -> newVecTyp(4, typFloat),
+    [2..3](polySampler, polyVec(typFloat), typFloat) -> newVecTyp(4, typFloat)
+  ]
 }
 
 proc tryCallBuiltin*(funcName: string, args: var seq[Expr]): Option[Typ] =

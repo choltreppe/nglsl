@@ -92,7 +92,7 @@ func `$`*(typ: Typ): string =
     else: ($typ)[0..0]
   case typ.kind
   of typBasic: $typ.typ
-  of typSampler: &"sampler{typ.samplerDim}d"
+  of typSampler: &"sampler{typ.samplerDim}D"
   of typVec: &"{typ.vecTyp.short}vec{typ.dim}"
   of typMat:
     if typ.cols == typ.rows: &"mat{typ.cols}"
@@ -116,9 +116,9 @@ let genericTyps {.compiletime.} = block:
   typs
 
 proc parseTyp*(name: string): Option[Typ] =
-  let lowerName = name.toLower
   for (n, typ) in genericTyps:
-    if lowerName == n: return some(typ)
+    if cmpIgnoreCase(name, n) == 0:
+      return some(typ)
   try:
     some(parseEnum[BasicTyp](
       case name
@@ -153,4 +153,4 @@ proc parseTyp*(node: NimNode): Typ =
   of nnkEmpty: typVoid
 
   else:
-    glslErr "malformed type defenition: `{node.repr}`", node
+    glslErr &"malformed type defenition: `{node.repr}`", node
