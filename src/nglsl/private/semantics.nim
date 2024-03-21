@@ -92,6 +92,8 @@ proc bindSyms*(prog: var Prog): int =  # returns sym count
       of stmtFor:
         var symIds = symIds
         symIds.addVar stmt.forVar
+        bindSyms(stmt.forRange.a, symIds)
+        bindSyms(stmt.forRange.b, symIds)
         bindSyms(stmt.forBody, symIds)
 
   var symIds = builtinVarIds
@@ -197,9 +199,14 @@ proc inferTyps*(prog: var Prog, symCount: int) =
           checkMatVecMul(rtyp, ltyp, rows, cols)
         expr.typ = tryUnify(expr.lop, expr.rop)
       of opEq..opGe:
-        for typ in [ltyp, rtyp]:
-          if typ.kind != typBasic or typ.typ == typBool:
+        var dims: array[2, int]
+        for i, typ in [ltyp, rtyp]:
+          if typ.kind in {typBasic, typVec} and typ.elemTyp != typBool:
+            dims[i] = typ.dim
+          else:
             glslErr "expected a number type", expr.lineInfo
+        if dims[0] != dims[1]:
+          glslErr "vec dimensions don't matching", expr.lineInfo
         discard tryUnify(expr.lop, expr.rop)
         expr.typ = typBool
       of opAnd..opXor:
