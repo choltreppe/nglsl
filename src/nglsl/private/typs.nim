@@ -13,7 +13,7 @@ import ./utils
 
 type
   BasicTyp* = enum typBool="bool", typInt="int", typUint="uint", typFloat="float", typDouble="double"
-  TypKind* = enum typVoid="void", typBasic, typImage="image", typSampler, typVec="vec", typMat="mat", typArray
+  TypKind* = enum typVoid="void", typBasic, typImage="image", typSampler, typSamplerCube="samplerCube", typVec="vec", typMat="mat", typArray
   Typ* = ref object
     case kind*: TypKind
     of typBasic:
@@ -78,12 +78,12 @@ proc `==`*(a, b: Typ): bool =
   if system.`==`(a, nil) or system.`==`(b, nil): return false
   if a.kind != b.kind: return false
   case a.kind
-  of typVoid, typImage: true
   of typBasic: a.typ == b.typ
   of typSampler: a.samplerDim == b.samplerDim
   of typVec: a.dim == b.dim and a.vecTyp == b.vecTyp
   of typMat: a.rows == b.rows and a.cols == b.cols
   of typArray: a.len == b.len and a.arrayTyp == b.arrayTyp
+  else: true
 
 
 func `$`*(typ: Typ): string =
@@ -104,6 +104,8 @@ func `$`*(typ: Typ): string =
 let genericTyps {.compiletime.} = block:
   var typs: seq[(string, Typ)]
   proc addTyp(typ: Typ) = typs.add ($typ, typ)
+  addTyp typImage
+  addTyp typSamplerCube
   for dim in 1..3:
     addTyp newSamplerTyp(dim)
   for vecTyp in BasicTyp:

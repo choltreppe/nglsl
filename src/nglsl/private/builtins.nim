@@ -74,7 +74,8 @@ func match(args: var seq[Expr], funcTyp: PolyFuncTyp): Option[Typ] =   #TODO: ha
 
     case paramTyp.kind
     of specificTyp:
-      if arg.typ.isConvertableTo(paramTyp.typ):
+      if arg.typ == paramTyp.typ: discard
+      elif arg.typ.isConvertableTo(paramTyp.typ):
         conversions &= (i, paramTyp.typ)
       else: return
 
@@ -188,7 +189,8 @@ let builtinFuncs {.compiletime.} = toTable {
 
   "texture": @[
     [1..1](newSamplerTyp(1), typFloat) -> newVecTyp(4, typFloat),
-    [2..3](polySampler, polyVec(typFloat)) -> newVecTyp(4, typFloat)
+    [2..3](polySampler, polyVec(typFloat)) -> newVecTyp(4, typFloat),
+    [3..3](Typ(kind: typSamplerCube), newVecTyp(3, typFloat)) -> newVecTyp(4, typFloat)
   ],
   "textureLod": @[
     [1..1](newSamplerTyp(1), typFloat, typFloat) -> newVecTyp(4, typFloat),

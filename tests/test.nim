@@ -4,10 +4,10 @@ import nglsl
 let testShader = glsl:
   var
     a, b, x: Vec3
-    texMap: uniform Sampler2D
+    texture0: uniform SamplerCube
     finalColor: out Vec4
 
-  proc test(a, b: Vec2): Vec4 =
+  proc test(a, b: Vec2, tex: SamplerCube): Vec4 =
     var v = a * b
     var w = vec3(a, 0).cross vec3(b, 1)
     var x = 0.8 + 1
@@ -23,7 +23,8 @@ let testShader = glsl:
       return if a.y == 0.0: vec4(1) else: vec4(0)
 
   proc main =
-    finalColor += test(vec2(1, 0), vec2(0.8, 0.5))
+    finalColor = texture(texture0, a)
+    finalColor += test(vec2(1, 0), vec2(0.8, 0.5), texture0)
 
 debugEcho "\n", testShader, "\n"
 
