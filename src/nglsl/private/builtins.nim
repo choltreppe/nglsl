@@ -30,7 +30,7 @@ func polyVec: PolyParamTyp {.inline.} =
 func polyVec(typ: BasicTyp): PolyParamTyp {.inline.} =
   PolyParamTyp(kind: polyDimVec, elemTyp: typ)
 
-let polySampler {.compiletime.} = PolyParamTyp(kind: polyDimSampler)
+let polySampler = PolyParamTyp(kind: polyDimSampler)
 
 converter asPolyTyp(typ: Typ): PolyParamTyp =
   PolyParamTyp(kind: specificTyp, typ: typ)
@@ -110,10 +110,10 @@ func match(args: var seq[Expr], funcTyp: PolyFuncTyp): Option[Typ] =   #TODO: ha
     of polyDimSampler: newSamplerTyp(dim)
 
 
-let polyFloatVec {.compiletime.} = polyVec(typFloat)
-let compwiseFloatFuncTyp {.compiletime.} = [1..4](polyFloatVec) -> polyFloatVec
+let polyFloatVec = polyVec(typFloat)
+let compwiseFloatFuncTyp = [1..4](polyFloatVec) -> polyFloatVec
 
-let builtinFuncs {.compiletime.} = toTable {
+let builtinFuncs = toTable {
   "radians": @[compwiseFloatFuncTyp],
   "degrees": @[compwiseFloatFuncTyp],
   "sin": @[compwiseFloatFuncTyp],
@@ -206,7 +206,7 @@ proc tryCallBuiltin*(funcName: string, args: var seq[Expr]): Option[Typ] =
 
 
 
-let builtinVars* {.compiletime.}: seq[tuple[name: string, typ: Typ]] = @{
+let builtinVars*: seq[tuple[name: string, typ: Typ]] = @{
   "gl_Position": newVecTyp(4, typFloat),
   "gl_PointSize": typFloat.asTyp,
 

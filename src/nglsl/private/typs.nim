@@ -19,20 +19,18 @@ type
     of typBasic:
       typ*: BasicTyp
     of typSampler:
-      samplerDim: range[1..3]
+      samplerDim: int # 1..3
     of typVec:
-      dim: range[2..4]
+      dim: int # 2..4
       vecTyp*: BasicTyp
     of typMat:
-      cols*, rows*: range[2..4]
+      cols*, rows*: int # 2..4
     of typArray:
       len*: Natural
       arrayTyp*: Typ
     else: discard
 
-converter asTyp*(kind: TypKind): Typ =
-  new result
-  result.kind = kind
+converter asTyp*(kind: TypKind): Typ = Typ(kind: kind)
 
 converter asTyp*(typ: BasicTyp): Typ = Typ(kind: typBasic, typ: typ)
 
@@ -100,22 +98,26 @@ func `$`*(typ: Typ): string =
   of typArray: assert false; ""
   else: $typ.kind
 
-
-let genericTyps {.compiletime.} = block:
-  var typs: seq[(string, Typ)]
-  proc addTyp(typ: Typ) = typs.add ($typ, typ)
-  addTyp typImage
-  addTyp typSamplerCube
-  for dim in 1..3:
-    addTyp newSamplerTyp(dim)
-  for vecTyp in BasicTyp:
-    for dim in 2..4:
-      addTyp newVecTyp(dim, vecTyp)
-  for vecTyp in BasicTyp:
-    for cols in 2..4:
-      for rows in 2..4:
-        addTyp newMatTyp(cols, rows)
-  typs
+template defGenericTyps(body) =
+  when defined(nglslc):
+    let genericTyps {.inject.} = block: body
+  else:
+    let genericTyps {.inject, compiletime.} = block: body
+defGenericTyps:
+    var typs: seq[(string, Typ)]
+    proc addTyp(typ: Typ) = typs.add ($typ, typ)
+    addTyp typImage
+    addTyp typSamplerCube
+    for dim in 1..3:
+      addTyp newSamplerTyp(dim)
+    for vecTyp in BasicTyp:
+      for dim in 2..4:
+        addTyp newVecTyp(dim, vecTyp)
+    for vecTyp in BasicTyp:
+      for cols in 2..4:
+        for rows in 2..4:
+          addTyp newMatTyp(cols, rows)
+    typs
 
 proc parseTyp*(name: string): Option[Typ] =
   for (n, typ) in genericTyps:

@@ -67,9 +67,8 @@ type
       tcond*, tif*, telse*: Expr
 
     of exprBinOp:
-      case binop*: BinaryOp
-      of opAdd..opDiv: withAsgn*: bool
-      else: discard
+      binop*: BinaryOp
+      withAsgn*: bool   # only for binop in opAdd..opDiv
       lop*, rop*: Expr
 
     of exprPar: expr*: Expr

@@ -11,7 +11,7 @@ import fusion/matching
 import ./utils, ./ast, ./typs, ./builtins
 
 
-let builtinVarIds {.compiletime.} = block:
+let builtinVarIds = block:
   var res: Table[string, int]
   for i, (name, _) in builtinVars:
     res[name] = i
@@ -121,7 +121,7 @@ proc assertLVal(expr: Expr) =
   else: discard
 
 
-let builtinVarTyps {.compiletime.} = builtinVars.mapIt(it.typ)
+let builtinVarTyps = builtinVars.mapIt(it.typ)
 
 proc inferTyps*(prog: var Prog, symCount: int) =
   let funcs = prog.funcs

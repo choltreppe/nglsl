@@ -6,12 +6,22 @@
 #    distribution, for details about the copyright.
 #
 
-import std/macros
-import ./nglsl/private/[ast, parsing, semantics]
+import std/[macros, tables]
+import jsony
+import ./nglsl/private/[ast, parsing]
 
+
+when not declared(buildOS):
+  const buildOS {.magic: "BuildOS".}: string = ""
+
+const cmdPrefix =
+  when buildOS == "windows": "cmd /C "
+  else: ""
 
 macro glsl*(body: untyped): string =
-  var prog = parse(body)
-  let symCount = bindSyms(prog)
-  inferTyps(prog, symCount)
-  newLit(genCode(prog))
+  let data = parse(body).toJson
+  let (output, code) = gorgeEx(cmdPrefix & "nglslc", input=data)
+  if code == 0: newLit(output)
+  else:
+    echo output
+    quit code
