@@ -231,6 +231,21 @@ proc parse*(node: NimNode): Prog =
             typ: typ
           )
 
+    of nnkConstSection:
+      for defs in node:
+        assert defs[^1].kind != nnkEmpty
+        let val = parseExpr(defs[^1])
+        let typ =
+          if defs[^2].kind == nnkEmpty: Typ nil
+          else: parseTyp(defs[^2])
+        for name in defs[0 ..< ^2]:
+          result.consts &= ConstDef(
+            v: newVar(name.strVal),
+            typ: typ,
+            val: val,
+            lineInfo: name.lineInfo
+          )
+
     of nnkProcDef, nnkFuncDef:
       node[4].expectKind nnkEmpty
       let name = node.name.strVal

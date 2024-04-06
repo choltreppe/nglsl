@@ -7,6 +7,11 @@ let testShader = glsl:
     texture0: uniform SamplerCube
     finalColor: out Vec4
 
+  const
+    c1 = 23
+    c2 = vec3(4)
+    c4: uint = 1
+
   proc test(a, b: Vec2, tex: SamplerCube): Vec4 =
     var v = a * b
     var w = vec3(a, 0).cross vec3(b, 1)
@@ -23,6 +28,7 @@ let testShader = glsl:
       return if a.y == 0.0: vec4(1) else: vec4(0)
 
   proc main =
+    var foo: float = 1
     finalColor = texture(texture0, a)
     finalColor += test(vec2(1, 0), vec2(0.8, 0.5), texture0)
 

@@ -21,6 +21,12 @@ type
     v*: Var
     typ*: Typ
 
+  ConstDef* = object
+    v*: Var
+    typ*: Typ
+    val*: Expr
+    lineInfo*: string
+
   FuncDef* = object
     params*: seq[QualifiedVarDef]
     retTyp*: Typ
@@ -119,6 +125,7 @@ type
 
   Prog* = object
     toplevelDefs*: seq[QualifiedVarDef]
+    consts*: seq[ConstDef]
     funcs*: FuncTable
     stmts*: StmtList
 
@@ -263,6 +270,10 @@ proc genCode*(prog: Prog): string =
 
   for def in prog.toplevelDefs:
     code &= "\n"&gen(def)&";"
+
+  code &= "\n"
+  for c in prog.consts:
+    code &= &"\nconst {genVarDef(c.v, c.typ)} = {c.val};"
 
   for name, defs in prog.funcs:
     for def in defs:

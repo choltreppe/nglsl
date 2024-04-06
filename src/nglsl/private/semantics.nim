@@ -99,6 +99,8 @@ proc bindSyms*(prog: var Prog): int =  # returns sym count
   var symIds = builtinVarIds
   for def in prog.toplevelDefs.mitems:
     symIds.addVar def.v
+  for c in prog.consts.mitems:
+    symIds.addVar c.v
 
   for funcs in prog.funcs.mvalues:
     for def in funcs.mitems:
@@ -287,7 +289,10 @@ proc inferTyps*(prog: var Prog, symCount: int) =
         assertLVal stmt.lval
         inferTyps stmt.lval
         inferTyps stmt.rval
-        assertEq stmt.lval.typ, stmt.rval.typ, stmt.lineInfo
+        if stmt.rval.isConvertableTo stmt.lval:
+          stmt.rval.convertTo(stmt.lval.typ)
+        else:
+          typErr stmt.lval.typ, stmt.rval.typ, stmt.lineInfo
 
       of stmtReturn:
         inferTyps stmt.ret
@@ -319,6 +324,15 @@ proc inferTyps*(prog: var Prog, symCount: int) =
 
   for def in prog.toplevelDefs:
     varTyps[def.v.id] = def.typ
+
+  for c in prog.consts.mitems:
+    inferTyps c.val
+    if c.typ == nil:
+      c.typ = c.val.typ
+    elif c.val.typ.isConvertableTo c.typ:
+      c.val.convertTo(c.typ)
+    else:
+      typErr c.val.typ, c.typ, c.lineInfo
 
   for funcs in prog.funcs.mvalues:
     for def in funcs.mitems:

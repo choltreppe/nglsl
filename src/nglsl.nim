@@ -20,7 +20,7 @@ const cmdPrefix =
 
 macro glsl*(body: untyped): string =
   let data = parse(body).toJson
-  let (output, code) = gorgeEx(cmdPrefix & "nglslc", input=data)
+  let (output, code) = gorgeEx(cmdPrefix & "nglslc", input=data, cache=data)
   if code == 0: newLit(output)
   else:
     echo output
