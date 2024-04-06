@@ -289,7 +289,7 @@ proc inferTyps*(prog: var Prog, symCount: int) =
         assertLVal stmt.lval
         inferTyps stmt.lval
         inferTyps stmt.rval
-        if stmt.rval.isConvertableTo stmt.lval:
+        if stmt.rval.typ.isConvertableTo stmt.lval.typ:
           stmt.rval.convertTo(stmt.lval.typ)
         else:
           typErr stmt.lval.typ, stmt.rval.typ, stmt.lineInfo
