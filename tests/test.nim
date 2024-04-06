@@ -12,6 +12,10 @@ let testShader = glsl:
     c2 = vec3(4)
     c4: uint = 1
 
+  const
+    r = 6
+    poin = r
+
   proc test(a, b: Vec2, tex: SamplerCube): Vec4 =
     var v = a * b
     var w = vec3(a, 0).cross vec3(b, 1)

@@ -100,6 +100,7 @@ proc bindSyms*(prog: var Prog): int =  # returns sym count
   for def in prog.toplevelDefs.mitems:
     symIds.addVar def.v
   for c in prog.consts.mitems:
+    bindSyms(c.val, symIds)
     symIds.addVar c.v
 
   for funcs in prog.funcs.mvalues:
@@ -333,6 +334,7 @@ proc inferTyps*(prog: var Prog, symCount: int) =
       c.val.convertTo(c.typ)
     else:
       typErr c.val.typ, c.typ, c.lineInfo
+    varTyps[c.v.id] = c.typ
 
   for funcs in prog.funcs.mvalues:
     for def in funcs.mitems:
